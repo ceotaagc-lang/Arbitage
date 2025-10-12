@@ -1,51 +1,44 @@
 document.addEventListener('DOMContentLoaded', () => {
     const opportunitiesList = document.getElementById('opportunities-list');
     const statusDiv = document.getElementById('status');
-    const tokenSymbol = 'eth';
+    const tokenSymbol = 'eth'; // Still controlled from the client
 
     async function fetchPrices() {
-        statusDiv.textContent = 'Fetching real-time data...';
+        statusDiv.textContent = 'Fetching real-time data from Bitget...';
 
         try {
-            // Call your Vercel serverless function at the API endpoint
+            // Call your Vercel serverless function, which now uses the Bitget API
             const response = await fetch(`/api/fetchArbitrage?tokenSymbol=${tokenSymbol}`);
             const data = await response.json();
 
             if (data.error) {
                 statusDiv.textContent = data.error;
+                opportunitiesList.innerHTML = '';
                 return;
             }
 
-            const tickers = data.tickers;
-            const usdtTickers = tickers.filter(t => t.target === 'USDT').slice(0, 5);
-
-            if (usdtTickers.length < 2) {
-                statusDiv.textContent = `Need at least 2 exchanges to compare prices for ${tokenSymbol.toUpperCase()}.`;
-                return;
-            }
-
-            let lowestPriceTicker = usdtTickers.reduce((min, ticker) => ticker.last < min.last ? ticker : min, usdtTickers[0]);
-            let highestPriceTicker = usdtTickers.reduce((max, ticker) => ticker.last > max.last ? ticker : max, usdtTickers[0]);
-
-            const priceDifference = highestPriceTicker.last - lowestPriceTicker.last;
-            const profitPercentage = (priceDifference / lowestPriceTicker.last) * 100;
-            const profitClass = profitPercentage > 0 ? 'positive' : 'negative';
+            // Extract data from the serverless function's response
+            const { lastPrice, highPrice, lowPrice, profitPercentage, profitClass, tokenSymbol: fetchedToken } = data;
 
             opportunitiesList.innerHTML = `
                 <div class="opportunity">
-                    <h3>Arbitrage Opportunity for ${tokenSymbol.toUpperCase()}</h3>
-                    <p>Buy at: ${lowestPriceTicker.market.name}</p>
+                    <h3>Intra-exchange Opportunity on Bitget for ${fetchedToken}</h3>
+                    <p>Current Price:</p>
                     <div class="exchange">
-                        <span>Price:</span>
-                        <span class="price">$${lowestPriceTicker.last.toFixed(2)}</span>
+                        <span>Last Trade Price:</span>
+                        <span class="price">$${lastPrice.toFixed(2)}</span>
                     </div>
-                    <p>Sell at: ${highestPriceTicker.market.name}</p>
+                    <p>24-Hour Price Range:</p>
                     <div class="exchange">
-                        <span>Price:</span>
-                        <span class="price">$${highestPriceTicker.last.toFixed(2)}</span>
+                        <span>Highest:</span>
+                        <span class="price">$${highPrice.toFixed(2)}</span>
                     </div>
-                    <p class="profit ${profitClass}">Potential Profit: ${profitPercentage.toFixed(2)}%</p>
-                    <p class="note">*This does not account for fees or slippage.</p>
+                    <div class="exchange">
+                        <span>Lowest:</span>
+                        <span class="price">$${lowPrice.toFixed(2)}</span>
+                    </div>
+                    <p class="profit ${profitClass}">Potential Volatility Profit: ${profitPercentage.toFixed(2)}%</p>
+                    <p class="note">*This opportunity is based on the 24h price range and does not account for fees or slippage.</p>
                 </div>
             `;
             statusDiv.textContent = 'Data updated.';
