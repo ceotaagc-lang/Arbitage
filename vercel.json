@@ -1,8 +1,11 @@
 {
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/public/$1" }
+  ],
   "crons": [
     {
-      "path": "/api/executeTrade",
-      "schedule": "0 */4 * * *"
+      "path": "/api/checkArbitrage",
+      "schedule": "*/1 * * * *"  // Run `checkArbitrage.js` every minute
     }
   ]
 }
