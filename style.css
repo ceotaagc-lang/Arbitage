@@ -1,0 +1,74 @@
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background-color: #f4f7f9;
+    color: #333;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    margin: 0;
+    line-height: 1.6;
+}
+
+.container {
+    background: #fff;
+    padding: 3rem;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+    max-width: 800px;
+    width: 100%;
+    text-align: center;
+}
+
+h1 {
+    color: #2c3e50;
+    margin-bottom: 1rem;
+}
+
+#status {
+    font-size: 1.1rem;
+    font-style: italic;
+    color: #777;
+    margin-bottom: 2rem;
+}
+
+.opportunity {
+    background-color: #e9ecef;
+    border-left: 5px solid #2ecc71;
+    padding: 1.5rem;
+    margin-bottom: 1rem;
+    border-radius: 8px;
+    text-align: left;
+    transition: transform 0.2s ease-in-out;
+}
+
+.opportunity:hover {
+    transform: translateY(-5px);
+}
+
+.exchange {
+    display: flex;
+    justify-content: space-between;
+    font-size: 1rem;
+    margin-bottom: 0.5rem;
+}
+
+.exchange .price {
+    font-weight: bold;
+    color: #34495e;
+}
+
+.profit {
+    margin-top: 1rem;
+    font-weight: bold;
+    font-size: 1.2rem;
+}
+
+.positive {
+    color: #2ecc71;
+}
+
+.negative {
+    color: #e74c3c;
+}
+sl
