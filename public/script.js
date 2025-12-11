@@ -1,46 +1,27 @@
-// Live market monitor for simple arbitrage across Binance and Coinbase public tickers.
-// WARNING: This script only fetches public prices and simulates trades locally.
-// To place real trades, implement a secure backend to hold API keys and sign requests.
+// Bitget-only public ticker monitor + client-side simulate trade button.
+// WARNING: This only reads public data. It does NOT place trades or use API keys.
 
-const EXCHANGES = {
-  binance: {
-    name: 'Binance',
-    // Binance uses symbols like BTCUSDT, ETHUSDT
-    tickerUrl: (sym) => `https://api.binance.com/api/v3/ticker/price?symbol=${sym}`
-  },
-  coinbase: {
-    name: 'Coinbase Pro',
-    // Coinbase Pro product ids like BTC-USD, ETH-USD
-    tickerUrl: (prod) => `https://api.pro.coinbase.com/products/${prod}/ticker`
-  }
+const EXCHANGE = {
+  name: 'Bitget',
+  // Bitget spot public ticker (spot v1)
+  // Example: https://api.bitget.com/api/spot/v1/market/ticker?symbol=BTCUSDT
+  tickerUrl: (symbol) => `https://api.bitget.com/api/spot/v1/market/ticker?symbol=${symbol}`
 };
 
 const SYMBOL_MAP = {
-  BTC: {
-    binance: 'BTCUSDT',
-    coinbase: 'BTC-USD'
-  },
-  ETH: {
-    binance: 'ETHUSDT',
-    coinbase: 'ETH-USD'
-  },
-  // Add more mappings if needed
-  USDT: {
-    binance: 'USDTUSDT', // placeholder (not useful) — add proper mapping or remove
-    coinbase: 'USDT-USD'
-  }
+  BTC: 'BTCUSDT',
+  ETH: 'ETHUSDT'
 };
 
 let monitorInterval = null;
-let pollingMs = 10000; // 10s
-let lastPrices = {}; // { exchange: {price, ts} }
+let lastPrice = null;
 
 const statusEl = document.getElementById('status');
 const listEl = document.getElementById('opportunities-list');
 const startBtn = document.getElementById('startLiveBtn');
 const stopBtn = document.getElementById('stopLiveBtn');
 const symbolSelect = document.getElementById('symbolSelect');
-const thresholdInput = document.getElementById('thresholdInput');
+const pollMsInput = document.getElementById('pollMs');
 const simulateTradeBtn = document.getElementById('simulateTradeBtn');
 const tradeStatusEl = document.getElementById('trade-status');
 
@@ -48,114 +29,102 @@ function setStatus(s) {
   statusEl.textContent = s;
 }
 
-async function fetchBinancePrice(symbol) {
+async function fetchBitgetPrice(symbol) {
+  const url = EXCHANGE.tickerUrl(symbol);
   try {
-    const res = await fetch(EXCHANGES.binance.tickerUrl(symbol));
-    if (!res.ok) throw new Error(`Binance HTTP ${res.status}`);
-    const data = await res.json();
-    // { symbol: 'BTCUSDT', price: '...' }
-    return parseFloat(data.price);
-  } catch (err) {
-    console.warn('Binance fetch error', err);
-    return null;
-  }
-}
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
 
-async function fetchCoinbasePrice(productId) {
-  try {
-    const res = await fetch(EXCHANGES.coinbase.tickerUrl(productId));
-    if (!res.ok) throw new Error(`Coinbase HTTP ${res.status}`);
-    const data = await res.json();
-    // { trade_id:..., price: '...', size: '...', time: '...' }
-    return parseFloat(data.price);
-  } catch (err) {
-    console.warn('Coinbase fetch error', err);
-    return null;
-  }
-}
+    // Bitget responses can differ depending on endpoint/version.
+    // Try a few common shapes defensively:
+    // 1) { code: "00000", data: { last: "xxxx", ... } }
+    // 2) { data: { last: "xxxx", ... } }
+    // 3) { last: "xxxx", ... }
+    // 4) array or other shapes -> try to find any numeric string field.
 
-async function fetchPrices(symbolKey) {
-  const mapping = SYMBOL_MAP[symbolKey];
-  if (!mapping) throw new Error('Symbol mapping not found: ' + symbolKey);
-
-  const [binPrice, coinPrice] = await Promise.all([
-    fetchBinancePrice(mapping.binance),
-    fetchCoinbasePrice(mapping.coinbase)
-  ]);
-
-  const now = Date.now();
-  lastPrices = {
-    binance: { price: binPrice, ts: now },
-    coinbase: { price: coinPrice, ts: now }
-  };
-
-  return lastPrices;
-}
-
-function computeSpread(a, b) {
-  if (a == null || b == null) return null;
-  // compute (higher - lower) / lower * 100
-  const high = Math.max(a, b);
-  const low = Math.min(a, b);
-  const pct = ((high - low) / low) * 100;
-  const direction = a > b ? 'binance>coinbase' : 'coinbase>binance';
-  const winner = a > b ? 'binance' : 'coinbase';
-  const loser = a > b ? 'coinbase' : 'binance';
-  return { pct, high, low, winner, loser, direction };
-}
-
-function renderPrices(prices, spread, symbolKey) {
-  listEl.innerHTML = '';
-
-  const header = document.createElement('div');
-  header.innerHTML = `<strong>Symbol:</strong> ${symbolKey} — fetched at ${new Date().toLocaleTimeString()}`;
-  listEl.appendChild(header);
-
-  const table = document.createElement('div');
-  table.className = 'prices';
-  const b = prices.binance.price;
-  const c = prices.coinbase.price;
-  table.innerHTML = `
-    <div><strong>${EXCHANGES.binance.name}:</strong> ${b != null ? b.toLocaleString() : 'N/A'}</div>
-    <div><strong>${EXCHANGES.coinbase.name}:</strong> ${c != null ? c.toLocaleString() : 'N/A'}</div>
-  `;
-  listEl.appendChild(table);
-
-  const spreadEl = document.createElement('div');
-  if (spread == null) {
-    spreadEl.textContent = 'Spread: N/A (one or more prices missing)';
-  } else {
-    const threshold = parseFloat(thresholdInput.value) || 0;
-    spreadEl.innerHTML = `<strong>Spread:</strong> ${spread.pct.toFixed(4)}% — ${spread.direction}`;
-    if (spread.pct >= threshold) {
-      spreadEl.style.background = '#efe';
-      spreadEl.style.padding = '8px';
-      spreadEl.style.marginTop = '8px';
-    } else {
-      spreadEl.style.marginTop = '8px';
+    // Case 1 & 2
+    if (json && (json.data || json.result)) {
+      const obj = json.data || json.result;
+      if (obj && typeof obj === 'object') {
+        // Common field names: last, lastPrice, price
+        if (obj.last) return parseFloat(obj.last);
+        if (obj.lastPrice) return parseFloat(obj.lastPrice);
+        if (obj.price) return parseFloat(obj.price);
+        // Some endpoints give a list under 'tick' or similar
+        if (obj.tick && obj.tick.close) return parseFloat(obj.tick.close);
+      }
     }
+
+    // Case 3
+    if (json && json.last) return parseFloat(json.last);
+    if (json && json.price) return parseFloat(json.price);
+    if (json && json.p) return parseFloat(json.p);
+
+    // Fallback: search object for a plausible numeric field
+    const findNumeric = (o) => {
+      if (!o || typeof o !== 'object') return null;
+      for (const k of Object.keys(o)) {
+        const v = o[k];
+        if (typeof v === 'string' && !isNaN(parseFloat(v))) return parseFloat(v);
+        if (typeof v === 'number' && isFinite(v)) return v;
+      }
+      return null;
+    };
+
+    const numeric = findNumeric(json);
+    if (numeric != null) return numeric;
+
+    // No usable price found
+    return null;
+  } catch (err) {
+    console.warn('Bitget fetch error', err);
+    return null;
   }
-  listEl.appendChild(spreadEl);
 }
 
 async function tick() {
-  const symbol = symbolSelect.value;
-  setStatus('Fetching prices...');
+  const symbolKey = symbolSelect.value;
+  const mapping = SYMBOL_MAP[symbolKey];
+  if (!mapping) {
+    setStatus('Symbol mapping not found: ' + symbolKey);
+    return;
+  }
+
+  setStatus(`Fetching ${mapping} from Bitget...`);
   try {
-    const prices = await fetchPrices(symbol);
-    const spread = computeSpread(prices.binance.price, prices.coinbase.price);
-    renderPrices(prices, spread, symbol);
-    setStatus('Last update: ' + new Date().toLocaleTimeString());
+    const price = await fetchBitgetPrice(mapping);
+    const ts = Date.now();
+    lastPrice = price != null ? { price, ts } : null;
+    renderPrice(lastPrice, symbolKey);
+    setStatus(price != null ? `Last update: ${new Date(ts).toLocaleTimeString()}` : 'Price unavailable');
   } catch (err) {
     console.error(err);
-    setStatus('Error fetching prices: ' + err.message);
+    setStatus('Error fetching price: ' + err.message);
   }
 }
 
+function renderPrice(p, symbolKey) {
+  listEl.innerHTML = '';
+  const header = document.createElement('div');
+  header.innerHTML = `<strong>Exchange:</strong> ${EXCHANGE.name} &nbsp; <strong>Symbol:</strong> ${symbolKey}`;
+  listEl.appendChild(header);
+
+  const priceEl = document.createElement('div');
+  if (!p) {
+    priceEl.innerHTML = `<div><strong>Price:</strong> N/A</div><div style="color:#a00">Could not parse price from Bitget response.</div>`;
+  } else {
+    priceEl.innerHTML = `<div><strong>Price:</strong> ${p.price.toLocaleString(undefined, {maximumFractionDigits: 8})} USD</div>
+                         <div style="font-size: 12px; color:#666">fetched at ${new Date(p.ts).toLocaleTimeString()}</div>`;
+  }
+  listEl.appendChild(priceEl);
+}
+
 startBtn.addEventListener('click', () => {
+  const ms = parseInt(pollMsInput.value, 10) || 10000;
   if (monitorInterval) return;
-  tick(); // immediate
-  monitorInterval = setInterval(tick, pollingMs);
+  tick();
+  monitorInterval = setInterval(tick, ms);
   startBtn.disabled = true;
   stopBtn.disabled = false;
   setStatus('Live monitoring started.');
@@ -171,35 +140,27 @@ stopBtn.addEventListener('click', () => {
 });
 
 simulateTradeBtn.addEventListener('click', () => {
-  const prices = lastPrices;
-  if (!prices || !prices.binance || !prices.coinbase) {
-    tradeStatusEl.textContent = 'No prices available to simulate trade.';
-    return;
-  }
-  const s = computeSpread(prices.binance.price, prices.coinbase.price);
-  if (!s) {
-    tradeStatusEl.textContent = 'Cannot compute spread.';
+  if (!lastPrice || lastPrice.price == null) {
+    tradeStatusEl.textContent = 'No price available to simulate a trade.';
     return;
   }
 
-  // Simulation parameters (client-side only)
-  const amountBase = 0.001; // e.g., 0.001 BTC
-  const feePct = 0.1; // fee percent per side (0.1%)
-  const feeFactor = (p) => p * (feePct / 100);
-
-  // Simulate buy on loser (low price) and sell on winner (high price)
-  const buyPrice = s.low;
-  const sellPrice = s.high;
-  const gross = (sellPrice - buyPrice) * amountBase;
-  const fees = feeFactor(buyPrice * amountBase) + feeFactor(sellPrice * amountBase);
-  const net = gross - fees;
+  // Simulation params
+  const baseAmount = 0.001; // e.g., 0.001 BTC
+  const feePctPerSide = 0.1; // 0.1% per side as example
+  const buyPrice = lastPrice.price;
+  const sellPrice = lastPrice.price; // this is a local simulation — same price used
+  const grossUSD = (sellPrice - buyPrice) * baseAmount;
+  const feesUSD = (buyPrice * baseAmount) * (feePctPerSide / 100) + (sellPrice * baseAmount) * (feePctPerSide / 100);
+  const netUSD = grossUSD - feesUSD;
 
   tradeStatusEl.innerHTML = `
-    Simulated trade: buy ${amountBase} ${symbolSelect.value} at ${buyPrice.toFixed(2)}, sell at ${sellPrice.toFixed(2)}.<br>
-    Gross P/L: ${gross.toFixed(8)} USD (approx). Fees: ${fees.toFixed(8)} USD. Net: ${net.toFixed(8)} USD.<br>
-    Note: This is only a simulation. Real execution requires checking order book depth, slippage, transfer times, and fees on each exchange.
+    Simulated trade on Bitget: buy ${baseAmount} ${symbolSelect.value} at ${buyPrice.toFixed(2)} USD, sell at ${sellPrice.toFixed(2)} USD.<br>
+    Gross P/L: ${grossUSD.toFixed(8)} USD. Estimated fees: ${feesUSD.toFixed(8)} USD. Net: ${netUSD.toFixed(8)} USD.<br>
+    Note: This simulation uses the same ticker price for buy and sell (client-only). Real trading requires orderbook checks, slippage, transfer times and a backend with API keys.
   `;
 });
 
-// Initialize small UI state
-setStatus('Idle. Select a symbol and click "Start Live Monitoring".');
+// Initialize UI
+setStatus('Idle. Select symbol and click Start.');
+renderPrice(null, symbolSelect.value);
