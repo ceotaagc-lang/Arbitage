@@ -1,11 +1,12 @@
 {
   "rewrites": [
+    { "source": "/api/:path*", "destination": "/api/:path*" },
     { "source": "/(.*)", "destination": "/public/$1" }
   ],
   "crons": [
     {
       "path": "/api/checkArbitrage",
-      "schedule": "*/1 * * * *"  // Run `checkArbitrage.js` every minute
+      "schedule": "*/1 * * * *"
     }
   ]
 }
