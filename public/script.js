@@ -1,95 +1,205 @@
-document.addEventListener('DOMContentLoaded', () => {
-    const opportunitiesList = document.getElementById('opportunities-list');
-    const statusDiv = document.getElementById('status');
-    const tradeStatusDiv = document.getElementById('trade-status'); // Will show simulated or last trade status
-    const tokenSymbol = 'eth';
+// Live market monitor for simple arbitrage across Binance and Coinbase public tickers.
+// WARNING: This script only fetches public prices and simulates trades locally.
+// To place real trades, implement a secure backend to hold API keys and sign requests.
 
-    async function fetchRealMarketData() {
-        statusDiv.textContent = `Fetching real-time market data for ${tokenSymbol.toUpperCase()}...`;
+const EXCHANGES = {
+  binance: {
+    name: 'Binance',
+    // Binance uses symbols like BTCUSDT, ETHUSDT
+    tickerUrl: (sym) => `https://api.binance.com/api/v3/ticker/price?symbol=${sym}`
+  },
+  coinbase: {
+    name: 'Coinbase Pro',
+    // Coinbase Pro product ids like BTC-USD, ETH-USD
+    tickerUrl: (prod) => `https://api.pro.coinbase.com/products/${prod}/ticker`
+  }
+};
 
-        try {
-            const response = await fetch(`/api/fetchMarketData?tokenSymbol=${tokenSymbol}`);
-            const data = await response.json();
+const SYMBOL_MAP = {
+  BTC: {
+    binance: 'BTCUSDT',
+    coinbase: 'BTC-USD'
+  },
+  ETH: {
+    binance: 'ETHUSDT',
+    coinbase: 'ETH-USD'
+  },
+  // Add more mappings if needed
+  USDT: {
+    binance: 'USDTUSDT', // placeholder (not useful) — add proper mapping or remove
+    coinbase: 'USDT-USD'
+  }
+};
 
-            if (data.error) {
-                statusDiv.textContent = `Error: ${data.error}`;
-                opportunitiesList.innerHTML = '';
-                return;
-            }
+let monitorInterval = null;
+let pollingMs = 10000; // 10s
+let lastPrices = {}; // { exchange: {price, ts} }
 
-            const { lastPrice, highPrice, lowPrice, volatilityPercentage, profitClass, tokenSymbol: fetchedToken, exchange } = data;
+const statusEl = document.getElementById('status');
+const listEl = document.getElementById('opportunities-list');
+const startBtn = document.getElementById('startLiveBtn');
+const stopBtn = document.getElementById('stopLiveBtn');
+const symbolSelect = document.getElementById('symbolSelect');
+const thresholdInput = document.getElementById('thresholdInput');
+const simulateTradeBtn = document.getElementById('simulateTradeBtn');
+const tradeStatusEl = document.getElementById('trade-status');
 
-            opportunitiesList.innerHTML = `
-                <div class="opportunity">
-                    <h3>Real-Time Data for ${fetchedToken} on ${exchange}</h3>
-                    <p>Current Price:</p>
-                    <div class="exchange">
-                        <span>Last Trade Price:</span>
-                        <span class="price">$${lastPrice.toFixed(2)}</span>
-                    </div>
-                    <p>24-Hour Price Range:</p>
-                    <div class="exchange">
-                        <span>Highest:</span>
-                        <span class="price">$${highPrice.toFixed(2)}</span>
-                    </div>
-                    <div class="exchange">
-                        <span>Lowest:</span>
-                        <span class="price">$${lowPrice.toFixed(2)}</span>
-                    </div>
-                    <p class="profit ${profitClass}">24h Volatility: ${volatilityPercentage.toFixed(2)}%</p>
-                    <p class="note">*Data from ${exchange}.</p>
-                </div>
-            `;
-            statusDiv.textContent = `Real-time data updated for ${fetchedToken} on ${exchange}.`;
+function setStatus(s) {
+  statusEl.textContent = s;
+}
 
-        } catch (error) {
-            console.error('Error fetching real-time market data:', error);
-            statusDiv.textContent = 'Error fetching real-time market data. Please try again later.';
-        }
+async function fetchBinancePrice(symbol) {
+  try {
+    const res = await fetch(EXCHANGES.binance.tickerUrl(symbol));
+    if (!res.ok) throw new Error(`Binance HTTP ${res.status}`);
+    const data = await res.json();
+    // { symbol: 'BTCUSDT', price: '...' }
+    return parseFloat(data.price);
+  } catch (err) {
+    console.warn('Binance fetch error', err);
+    return null;
+  }
+}
+
+async function fetchCoinbasePrice(productId) {
+  try {
+    const res = await fetch(EXCHANGES.coinbase.tickerUrl(productId));
+    if (!res.ok) throw new Error(`Coinbase HTTP ${res.status}`);
+    const data = await res.json();
+    // { trade_id:..., price: '...', size: '...', time: '...' }
+    return parseFloat(data.price);
+  } catch (err) {
+    console.warn('Coinbase fetch error', err);
+    return null;
+  }
+}
+
+async function fetchPrices(symbolKey) {
+  const mapping = SYMBOL_MAP[symbolKey];
+  if (!mapping) throw new Error('Symbol mapping not found: ' + symbolKey);
+
+  const [binPrice, coinPrice] = await Promise.all([
+    fetchBinancePrice(mapping.binance),
+    fetchCoinbasePrice(mapping.coinbase)
+  ]);
+
+  const now = Date.now();
+  lastPrices = {
+    binance: { price: binPrice, ts: now },
+    coinbase: { price: coinPrice, ts: now }
+  };
+
+  return lastPrices;
+}
+
+function computeSpread(a, b) {
+  if (a == null || b == null) return null;
+  // compute (higher - lower) / lower * 100
+  const high = Math.max(a, b);
+  const low = Math.min(a, b);
+  const pct = ((high - low) / low) * 100;
+  const direction = a > b ? 'binance>coinbase' : 'coinbase>binance';
+  const winner = a > b ? 'binance' : 'coinbase';
+  const loser = a > b ? 'coinbase' : 'binance';
+  return { pct, high, low, winner, loser, direction };
+}
+
+function renderPrices(prices, spread, symbolKey) {
+  listEl.innerHTML = '';
+
+  const header = document.createElement('div');
+  header.innerHTML = `<strong>Symbol:</strong> ${symbolKey} — fetched at ${new Date().toLocaleTimeString()}`;
+  listEl.appendChild(header);
+
+  const table = document.createElement('div');
+  table.className = 'prices';
+  const b = prices.binance.price;
+  const c = prices.coinbase.price;
+  table.innerHTML = `
+    <div><strong>${EXCHANGES.binance.name}:</strong> ${b != null ? b.toLocaleString() : 'N/A'}</div>
+    <div><strong>${EXCHANGES.coinbase.name}:</strong> ${c != null ? c.toLocaleString() : 'N/A'}</div>
+  `;
+  listEl.appendChild(table);
+
+  const spreadEl = document.createElement('div');
+  if (spread == null) {
+    spreadEl.textContent = 'Spread: N/A (one or more prices missing)';
+  } else {
+    const threshold = parseFloat(thresholdInput.value) || 0;
+    spreadEl.innerHTML = `<strong>Spread:</strong> ${spread.pct.toFixed(4)}% — ${spread.direction}`;
+    if (spread.pct >= threshold) {
+      spreadEl.style.background = '#efe';
+      spreadEl.style.padding = '8px';
+      spreadEl.style.marginTop = '8px';
+    } else {
+      spreadEl.style.marginTop = '8px';
     }
+  }
+  listEl.appendChild(spreadEl);
+}
 
-    // This front-end button is now a placeholder.
-    // Real trades should be triggered by the automated backend function (`checkArbitrage.js`)
-    // via a Vercel Cron Job or similar mechanism, NOT directly by the user interface.
-    // The button remains for educational demonstration or if you decide to add a manual override (risky).
-    const simulateTradeBtn = document.getElementById('simulateTradeBtn');
-    if (simulateTradeBtn) {
-        simulateTradeBtn.addEventListener('click', async () => {
-            tradeStatusDiv.className = 'trade-info';
-            tradeStatusDiv.textContent = `Attempting a manual trade (for demonstration only!)...`;
-            simulateTradeBtn.disabled = true;
+async function tick() {
+  const symbol = symbolSelect.value;
+  setStatus('Fetching prices...');
+  try {
+    const prices = await fetchPrices(symbol);
+    const spread = computeSpread(prices.binance.price, prices.coinbase.price);
+    renderPrices(prices, spread, symbol);
+    setStatus('Last update: ' + new Date().toLocaleTimeString());
+  } catch (err) {
+    console.error(err);
+    setStatus('Error fetching prices: ' + err.message);
+  }
+}
 
-            try {
-                // For a real bot, you'd trigger `executeTrade` from a server-side logic
-                // For a front-end manual trigger, you'd pass the actual trade parameters.
-                const response = await fetch('/api/executeTrade', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        tokenSymbol: tokenSymbol,
-                        side: 'buy', // Example: always buy
-                        tradeSizeUSDT: 10 // Example: minimum trade size
-                    }),
-                });
-                const data = await response.json();
-
-                if (data.success) {
-                    tradeStatusDiv.className = 'trade-info success';
-                    tradeStatusDiv.innerHTML = `<strong>Manual Trade Success:</strong> Order ID: ${data.orderId}. Message: ${data.message}`;
-                } else {
-                    tradeStatusDiv.className = 'trade-info error';
-                    tradeStatusDiv.innerHTML = `<strong>Manual Trade Failed:</strong> ${data.error}. Response: ${JSON.stringify(data.bitgetResponse)}`;
-                }
-            } catch (error) {
-                console.error('Error triggering manual trade:', error);
-                tradeStatusDiv.className = 'trade-info error';
-                tradeStatusDiv.innerHTML = `<strong>Manual Trade Failed:</strong> Network error or server issue.`;
-            } finally {
-                simulateTradeBtn.disabled = false;
-            }
-        });
-    }
-
-    fetchRealMarketData();
-    setInterval(fetchRealMarketData, 30000); // Refresh display every 30 seconds
+startBtn.addEventListener('click', () => {
+  if (monitorInterval) return;
+  tick(); // immediate
+  monitorInterval = setInterval(tick, pollingMs);
+  startBtn.disabled = true;
+  stopBtn.disabled = false;
+  setStatus('Live monitoring started.');
 });
+
+stopBtn.addEventListener('click', () => {
+  if (!monitorInterval) return;
+  clearInterval(monitorInterval);
+  monitorInterval = null;
+  startBtn.disabled = false;
+  stopBtn.disabled = true;
+  setStatus('Stopped.');
+});
+
+simulateTradeBtn.addEventListener('click', () => {
+  const prices = lastPrices;
+  if (!prices || !prices.binance || !prices.coinbase) {
+    tradeStatusEl.textContent = 'No prices available to simulate trade.';
+    return;
+  }
+  const s = computeSpread(prices.binance.price, prices.coinbase.price);
+  if (!s) {
+    tradeStatusEl.textContent = 'Cannot compute spread.';
+    return;
+  }
+
+  // Simulation parameters (client-side only)
+  const amountBase = 0.001; // e.g., 0.001 BTC
+  const feePct = 0.1; // fee percent per side (0.1%)
+  const feeFactor = (p) => p * (feePct / 100);
+
+  // Simulate buy on loser (low price) and sell on winner (high price)
+  const buyPrice = s.low;
+  const sellPrice = s.high;
+  const gross = (sellPrice - buyPrice) * amountBase;
+  const fees = feeFactor(buyPrice * amountBase) + feeFactor(sellPrice * amountBase);
+  const net = gross - fees;
+
+  tradeStatusEl.innerHTML = `
+    Simulated trade: buy ${amountBase} ${symbolSelect.value} at ${buyPrice.toFixed(2)}, sell at ${sellPrice.toFixed(2)}.<br>
+    Gross P/L: ${gross.toFixed(8)} USD (approx). Fees: ${fees.toFixed(8)} USD. Net: ${net.toFixed(8)} USD.<br>
+    Note: This is only a simulation. Real execution requires checking order book depth, slippage, transfer times, and fees on each exchange.
+  `;
+});
+
+// Initialize small UI state
+setStatus('Idle. Select a symbol and click "Start Live Monitoring".');
