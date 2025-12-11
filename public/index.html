@@ -3,19 +3,46 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Crypto Arbitrage Tracker (Simulation)</title>
+    <title>Crypto Arbitrage Tracker (Live Market Monitor)</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="container">
-        <h1>Crypto Arbitrage Tracker (Simulation)</h1>
-        <p>This app simulates tracking market data and potential trade opportunities.</p>
-        <div id="status">Loading simulated market data...</div>
-        <div id="opportunities-list">
-            <!-- Simulated market data will be injected here -->
+        <h1>Crypto Arbitrage Tracker (Live Market Monitor)</h1>
+        <p>This app now monitors real public market prices from exchanges and highlights simple arbitrage spreads.</p>
+
+        <div class="controls">
+            <label for="symbolSelect">Symbol:</label>
+            <select id="symbolSelect">
+                <option value="BTC">BTC</option>
+                <option value="ETH">ETH</option>
+                <option value="USDT">USDT</option>
+            </select>
+
+            <label for="thresholdInput">Min spread % to highlight:</label>
+            <input id="thresholdInput" type="number" value="0.5" step="0.1" min="0">
+
+            <button id="startLiveBtn">Start Live Monitoring</button>
+            <button id="stopLiveBtn" disabled>Stop</button>
         </div>
+
+        <div id="status">Idle.</div>
+
+        <div id="opportunities-list">
+            <!-- Live market data will be injected here -->
+        </div>
+
         <button id="simulateTradeBtn">Simulate Trade</button>
         <div id="trade-status" class="trade-info"></div>
+
+        <div class="notes">
+            <h3>Notes & Safety</h3>
+            <ul>
+                <li>This client-side monitor fetches public tickers only. It does not place any real orders.</li>
+                <li>To execute real trades you must implement a secure backend that holds your exchange API keys and signs orders server-side (do NOT put API keys in client JS).</li>
+                <li>Test everything on exchange testnets before using real funds. Be aware of latency, fees, and order book depth — public ticker price ≠ guaranteed executable price.</li>
+            </ul>
+        </div>
     </div>
     <script src="script.js"></script>
 </body>
