@@ -1,49 +1,58 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Crypto Arbitrage Tracker (Live Market Monitor)</title>
-    <link rel="stylesheet" href="style.css">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Crypto Monitor — Bitget Only</title>
+    <link rel="stylesheet" href="style.css" />
+    <style>
+      /* Minimal inline styles to keep UI presentable if style.css missing */
+      body { font-family: Arial, Helvetica, sans-serif; margin: 20px; }
+      .container { max-width: 800px; margin: auto; }
+      .controls { margin: 12px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      #opportunities-list { margin-top: 12px; padding: 12px; border: 1px solid #ddd; border-radius: 6px; }
+      .trade-info { margin-top: 12px; padding: 8px; background: #f8f8f8; border-radius: 6px; }
+      button { padding: 6px 12px; }
+    </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Crypto Arbitrage Tracker (Live Market Monitor)</h1>
-        <p>This app now monitors real public market prices from exchanges and highlights simple arbitrage spreads.</p>
+  <div class="container">
+    <h1>Crypto Monitor — Bitget Only</h1>
+    <p>This page fetches public ticker prices from Bitget only. It does <strong>not</strong> place orders.</p>
 
-        <div class="controls">
-            <label for="symbolSelect">Symbol:</label>
-            <select id="symbolSelect">
-                <option value="BTC">BTC</option>
-                <option value="ETH">ETH</option>
-                <option value="USDT">USDT</option>
-            </select>
+    <div class="controls">
+      <label for="symbolSelect">Symbol:</label>
+      <select id="symbolSelect">
+        <option value="BTC">BTC</option>
+        <option value="ETH">ETH</option>
+      </select>
 
-            <label for="thresholdInput">Min spread % to highlight:</label>
-            <input id="thresholdInput" type="number" value="0.5" step="0.1" min="0">
+      <label for="pollMs">Poll (ms):</label>
+      <input id="pollMs" type="number" value="10000" step="1000" min="1000" style="width:100px"/>
 
-            <button id="startLiveBtn">Start Live Monitoring</button>
-            <button id="stopLiveBtn" disabled>Stop</button>
-        </div>
-
-        <div id="status">Idle.</div>
-
-        <div id="opportunities-list">
-            <!-- Live market data will be injected here -->
-        </div>
-
-        <button id="simulateTradeBtn">Simulate Trade</button>
-        <div id="trade-status" class="trade-info"></div>
-
-        <div class="notes">
-            <h3>Notes & Safety</h3>
-            <ul>
-                <li>This client-side monitor fetches public tickers only. It does not place any real orders.</li>
-                <li>To execute real trades you must implement a secure backend that holds your exchange API keys and signs orders server-side (do NOT put API keys in client JS).</li>
-                <li>Test everything on exchange testnets before using real funds. Be aware of latency, fees, and order book depth — public ticker price ≠ guaranteed executable price.</li>
-            </ul>
-        </div>
+      <button id="startLiveBtn">Start</button>
+      <button id="stopLiveBtn" disabled>Stop</button>
     </div>
-    <script src="script.js"></script>
+
+    <div id="status">Idle. Select symbol and click Start.</div>
+
+    <div id="opportunities-list">
+      <!-- Bitget price and info will appear here -->
+    </div>
+
+    <button id="simulateTradeBtn">Simulate Trade (client only)</button>
+    <div id="trade-status" class="trade-info"></div>
+
+    <div class="notes" style="margin-top:14px">
+      <h3>Notes & Safety</h3>
+      <ul>
+        <li>This client-side monitor fetches public tickers only — no keys, no orders.</li>
+        <li>To trade you must implement a secure backend that holds and uses your Bitget API keys (do NOT embed keys in client JS).</li>
+        <li>Public ticker prices are not guarantees of fill price; check orderbook and test on testnet first.</li>
+      </ul>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
 </body>
 </html>
